@@ -57,11 +57,22 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        "trail-success": "hsl(var(--trail-success))",
+        "trail-warning": "hsl(var(--trail-warning))",
+        "trail-emergency": "hsl(var(--trail-emergency))",
       },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+      },
+      backgroundImage: {
+        "gradient-primary": "var(--gradient-primary)",
+        "gradient-accent": "var(--gradient-accent)",
+      },
+      boxShadow: {
+        "elevation": "var(--shadow-elevation)",
+        "interactive": "var(--shadow-interactive)",
       },
       keyframes: {
         "accordion-down": {
