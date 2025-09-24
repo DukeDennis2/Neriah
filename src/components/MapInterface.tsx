@@ -1,28 +1,34 @@
 import React, { useEffect, useRef, useState } from 'react';
-import mapboxgl from 'mapbox-gl';
-import 'mapbox-gl/dist/mapbox-gl.css';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
-import { Navigation, MapPin, Route, Compass, Zap, Settings, Info } from 'lucide-react';
+import { Navigation, MapPin, Route, Compass, Zap, Wifi, WifiOff } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 
+// Fix Leaflet default markers
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
 interface MapInterfaceProps {
-  mapboxToken?: string;
-  onTokenSet?: (token: string) => void;
+  // No props needed - completely free!
 }
 
-const MapInterface: React.FC<MapInterfaceProps> = ({ mapboxToken, onTokenSet }) => {
+const MapInterface: React.FC<MapInterfaceProps> = () => {
   const mapContainer = useRef<HTMLDivElement>(null);
-  const map = useRef<mapboxgl.Map | null>(null);
+  const map = useRef<L.Map | null>(null);
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [currentAddress, setCurrentAddress] = useState<string>('');
   const [startPoint, setStartPoint] = useState('');
   const [endPoint, setEndPoint] = useState('');
   const [isOfflineMode, setIsOfflineMode] = useState(!navigator.onLine);
-  const [showTokenDialog, setShowTokenDialog] = useState(false);
-  const [tokenInput, setTokenInput] = useState('');
   const [locationLoading, setLocationLoading] = useState(true);
+  const [userMarker, setUserMarker] = useState<L.Marker | null>(null);
 
   // Get user location immediately on component mount
   useEffect(() => {
@@ -33,20 +39,19 @@ const MapInterface: React.FC<MapInterfaceProps> = ({ mapboxToken, onTokenSet }) 
           setUserLocation(coords);
           setLocationLoading(false);
           
-          // Try to get address using reverse geocoding (if we have a token)
-          if (mapboxToken) {
-            try {
-              const response = await fetch(
-                `https://api.mapbox.com/geocoding/v5/mapbox.places/${coords[0]},${coords[1]}.json?access_token=${mapboxToken}`
-              );
-              const data = await response.json();
-              if (data.features && data.features.length > 0) {
-                setCurrentAddress(data.features[0].place_name);
-              }
-            } catch (error) {
-              console.error('Geocoding error:', error);
+          // Try to get address using free Nominatim service (OpenStreetMap)
+          try {
+            const response = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${coords[1]}&lon=${coords[0]}&zoom=18&addressdetails=1`
+            );
+            const data = await response.json();
+            if (data && data.display_name) {
+              setCurrentAddress(data.display_name);
+            } else {
+              setCurrentAddress(`${coords[1].toFixed(4)}, ${coords[0].toFixed(4)}`);
             }
-          } else {
+          } catch (error) {
+            console.error('Geocoding error:', error);
             setCurrentAddress(`${coords[1].toFixed(4)}, ${coords[0].toFixed(4)}`);
           }
         },
@@ -63,50 +68,28 @@ const MapInterface: React.FC<MapInterfaceProps> = ({ mapboxToken, onTokenSet }) 
     } else {
       setLocationLoading(false);
     }
-  }, [mapboxToken]);
+  }, []);
 
-  // Initialize map when we have a token
+  // Initialize map when we have user location
   useEffect(() => {
-    if (!mapContainer.current || !mapboxToken || !userLocation) return;
+    if (!mapContainer.current || !userLocation) return;
 
-    // Initialize Mapbox
-    mapboxgl.accessToken = mapboxToken;
+    // Initialize Leaflet map
+    map.current = L.map(mapContainer.current).setView([userLocation[1], userLocation[0]], 15);
+
+    // Add OpenStreetMap tiles (completely free!)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map.current);
+
+    // Add user location marker
+    const marker = L.marker([userLocation[1], userLocation[0]], {
+      title: 'Your Location'
+    }).addTo(map.current);
     
-    map.current = new mapboxgl.Map({
-      container: mapContainer.current,
-      style: 'mapbox://styles/mapbox/outdoors-v12', // Perfect for hiking/outdoor use
-      center: userLocation,
-      zoom: 15,
-      pitch: 0,
-      bearing: 0,
-    });
-
-    // Add navigation controls
-    map.current.addControl(
-      new mapboxgl.NavigationControl({
-        visualizePitch: true,
-        showZoom: true,
-        showCompass: true,
-      }),
-      'top-right'
-    );
-
-    // Add geolocation control
-    const geolocate = new mapboxgl.GeolocateControl({
-      positionOptions: {
-        enableHighAccuracy: true
-      },
-      trackUserLocation: true,
-      showUserHeading: true,
-      showAccuracyCircle: true,
-    });
-
-    map.current.addControl(geolocate, 'top-right');
-
-    // Add a marker for current location
-    new mapboxgl.Marker({ color: '#ff6b35' })
-      .setLngLat(userLocation)
-      .addTo(map.current);
+    marker.bindPopup('📍 You are here').openPopup();
+    setUserMarker(marker);
 
     // Listen for offline/online status
     const handleOnline = () => setIsOfflineMode(false);
@@ -118,11 +101,14 @@ const MapInterface: React.FC<MapInterfaceProps> = ({ mapboxToken, onTokenSet }) 
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
-      map.current?.remove();
+      if (map.current) {
+        map.current.remove();
+        map.current = null;
+      }
     };
-  }, [mapboxToken, userLocation]);
+  }, [userLocation]);
 
-  const handleRouteCalculation = () => {
+  const handleRouteCalculation = async () => {
     if (!startPoint || !endPoint) {
       toast({
         title: "Route Planning",
@@ -132,36 +118,22 @@ const MapInterface: React.FC<MapInterfaceProps> = ({ mapboxToken, onTokenSet }) 
       return;
     }
 
-    // For now, show a message about route calculation
+    // Simple route calculation message
     toast({
       title: "Route Calculation",
-      description: "Calculating optimal route for offline navigation...",
+      description: "Calculating optimal route using free OpenStreetMap data...",
     });
+    
+    // TODO: Implement basic routing with OSRM (free routing service)
   };
 
   const handleCurrentLocation = () => {
     if (userLocation && map.current) {
-      map.current.flyTo({
-        center: userLocation,
-        zoom: 15,
-        duration: 1000,
-      });
+      map.current.setView([userLocation[1], userLocation[0]], 15);
+      if (userMarker) {
+        userMarker.openPopup();
+      }
     }
-  };
-
-  const handleTokenSubmit = () => {
-    if (tokenInput.trim() && onTokenSet) {
-      onTokenSet(tokenInput.trim());
-      setShowTokenDialog(false);
-      toast({
-        title: "Map Enhanced",
-        description: "Full navigation features are now available!",
-      });
-    }
-  };
-
-  const handleSetupMaps = () => {
-    setShowTokenDialog(true);
   };
 
   return (
@@ -178,6 +150,7 @@ const MapInterface: React.FC<MapInterfaceProps> = ({ mapboxToken, onTokenSet }) 
               </div>
               <h2 className="text-xl font-bold">TrailFinder</h2>
               <p className="text-muted-foreground">Finding your location...</p>
+              <p className="text-xs text-muted-foreground">100% Free • No API Keys Needed</p>
             </div>
           </Card>
         </div>
@@ -187,13 +160,13 @@ const MapInterface: React.FC<MapInterfaceProps> = ({ mapboxToken, onTokenSet }) 
       {isOfflineMode && (
         <div className="absolute top-0 left-0 right-0 z-50 bg-accent text-accent-foreground p-2 text-center font-semibold">
           <div className="flex items-center justify-center gap-2">
-            <Zap className="h-4 w-4" />
-            OFFLINE MODE - Limited features
+            <WifiOff className="h-4 w-4" />
+            OFFLINE MODE - Using cached maps
           </div>
         </div>
       )}
 
-      {/* Current Location Card - Shows immediately like Google Maps */}
+      {/* Current Location Card */}
       {userLocation && !locationLoading && (
         <Card className="absolute top-4 left-4 right-4 z-40 p-4 bg-card/95 backdrop-blur-sm">
           <div className="space-y-3">
@@ -202,17 +175,10 @@ const MapInterface: React.FC<MapInterfaceProps> = ({ mapboxToken, onTokenSet }) 
                 <Navigation className="h-5 w-5 text-primary" />
                 <h1 className="font-bold text-lg">TrailFinder</h1>
               </div>
-              {!mapboxToken && (
-                <Button
-                  onClick={handleSetupMaps}
-                  variant="outline"
-                  size="sm"
-                  className="flex items-center gap-1"
-                >
-                  <Settings className="h-4 w-4" />
-                  Setup Maps
-                </Button>
-              )}
+              <div className="flex items-center gap-1 text-xs bg-trail-success/10 text-trail-success px-2 py-1 rounded-full">
+                <Wifi className="h-3 w-3" />
+                FREE
+              </div>
             </div>
 
             {/* Current Location Display */}
@@ -228,132 +194,60 @@ const MapInterface: React.FC<MapInterfaceProps> = ({ mapboxToken, onTokenSet }) 
               </div>
             </div>
             
-            {mapboxToken && (
-              <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <Input
-                    placeholder="Start point (or use current location)"
-                    value={startPoint}
-                    onChange={(e) => setStartPoint(e.target.value)}
-                    className="bg-background"
-                  />
-                  <Input
-                    placeholder="Destination"
-                    value={endPoint}
-                    onChange={(e) => setEndPoint(e.target.value)}
-                    className="bg-background"
-                  />
-                </div>
-                
-                <div className="flex gap-2 flex-wrap">
-                  <Button 
-                    onClick={handleCurrentLocation}
-                    variant="secondary"
-                    size="sm"
-                    className="flex items-center gap-1"
-                  >
-                    <Compass className="h-4 w-4" />
-                    Center Map
-                  </Button>
-                  
-                  <Button 
-                    onClick={handleRouteCalculation}
-                    className="flex items-center gap-1 btn-trail"
-                    size="sm"
-                  >
-                    <Route className="h-4 w-4" />
-                    Plan Route
-                  </Button>
-                </div>
-              </>
-            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <Input
+                placeholder="Start point (or use current location)"
+                value={startPoint}
+                onChange={(e) => setStartPoint(e.target.value)}
+                className="bg-background"
+              />
+              <Input
+                placeholder="Destination"
+                value={endPoint}
+                onChange={(e) => setEndPoint(e.target.value)}
+                className="bg-background"
+              />
+            </div>
+            
+            <div className="flex gap-2 flex-wrap">
+              <Button 
+                onClick={handleCurrentLocation}
+                variant="secondary"
+                size="sm"
+                className="flex items-center gap-1"
+              >
+                <Compass className="h-4 w-4" />
+                Center Map
+              </Button>
+              
+              <Button 
+                onClick={handleRouteCalculation}
+                className="flex items-center gap-1 btn-trail"
+                size="sm"
+              >
+                <Route className="h-4 w-4" />
+                Plan Route
+              </Button>
+            </div>
           </div>
         </Card>
       )}
 
-      {/* Map Container or Basic View */}
-      {mapboxToken ? (
-        <div 
-          ref={mapContainer} 
-          className="absolute inset-0 rounded-lg"
-          style={{ top: isOfflineMode ? '48px' : '0' }}
-        />
-      ) : (
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-accent/5 flex items-center justify-center">
-          <div className="text-center p-8">
-            <div className="mb-4">
-              <MapPin className="h-16 w-16 text-primary mx-auto mb-2" />
-              <h3 className="text-lg font-semibold">Basic Location View</h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                Setup Mapbox for full navigation features
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Token Setup Dialog */}
-      {showTokenDialog && (
-        <div className="absolute inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <Card className="p-6 max-w-lg w-full">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-bold">Setup Map Navigation</h2>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowTokenDialog(false)}
-                >
-                  ×
-                </Button>
-              </div>
-              
-              <div>
-                <label className="text-sm font-medium mb-2 block">
-                  Mapbox Public Token
-                </label>
-                <Input
-                  type="password"
-                  placeholder="pk.eyJ1..."
-                  value={tokenInput}
-                  onChange={(e) => setTokenInput(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleTokenSubmit()}
-                  className="mb-3"
-                />
-                <Button 
-                  onClick={handleTokenSubmit}
-                  disabled={!tokenInput.trim()}
-                  className="w-full btn-trail"
-                >
-                  Enable Full Navigation
-                </Button>
-              </div>
-
-              <div className="bg-muted/50 p-4 rounded-lg">
-                <div className="flex items-start gap-2 mb-2">
-                  <Info className="h-4 w-4 text-primary mt-0.5" />
-                  <span className="font-medium text-sm">Get your free token:</span>
-                </div>
-                <ol className="text-xs text-muted-foreground space-y-1 ml-6">
-                  <li>1. Visit <a href="https://mapbox.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">mapbox.com</a></li>
-                  <li>2. Create a free account</li>
-                  <li>3. Go to Account → Tokens</li>
-                  <li>4. Copy your Default Public Token</li>
-                </ol>
-              </div>
-            </div>
-          </Card>
-        </div>
-      )}
+      {/* Map Container */}
+      <div 
+        ref={mapContainer} 
+        className="absolute inset-0 rounded-lg"
+        style={{ top: isOfflineMode ? '48px' : '0' }}
+      />
 
       {/* Bottom Status Panel */}
       {userLocation && !locationLoading && (
         <Card className="absolute bottom-4 left-4 right-4 z-40 p-3 bg-card/95 backdrop-blur-sm">
           <div className="flex items-center justify-between text-sm">
             <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${mapboxToken ? (isOfflineMode ? 'bg-accent' : 'bg-trail-success') : 'bg-trail-warning'}`}></div>
+              <div className={`w-2 h-2 rounded-full ${isOfflineMode ? 'bg-accent' : 'bg-trail-success'}`}></div>
               <span className="font-medium">
-                {mapboxToken ? (isOfflineMode ? 'Offline Ready' : 'Full Navigation') : 'Basic Mode'}
+                {isOfflineMode ? 'Offline Ready' : 'OpenStreetMap • Free'}
               </span>
             </div>
             
