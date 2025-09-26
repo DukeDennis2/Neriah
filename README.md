@@ -55,7 +55,6 @@ Licensed under the MIT License.
 
 
 ** COMPONENT DIAGRAM ** 
-
-![alt text](<Screenshot 2025-09-26 at 00.11.02.png>)
-![alt text](<Screenshot 2025-09-26 at 00.10.48.png>)
 ![alt text](<Screenshot 2025-09-26 at 00.10.23.png>)
+![alt text](<Screenshot 2025-09-26 at 00.10.48.png>)
+![alt text](<Screenshot 2025-09-26 at 00.11.02.png>)
