@@ -1,5 +1,4 @@
-🌍 Neriah
-
+🌍 Neriah 🌏
 📖 About
 Neriah is a mobile-first, emergency-focused navigation and mapping app.
 Built with HTML, CSS, and TypeScript.
