@@ -49,9 +49,8 @@ Run the development server:
 📜 License
 
 Licensed under the MIT License.
-
-See the LICENSE
-file for details.
+    See the LICENSE
+    file for details.
 
 
 
